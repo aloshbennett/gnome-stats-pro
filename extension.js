@@ -34,6 +34,30 @@ const ITEM_LABEL_SHOW_TIME = 0.15;
 const ITEM_LABEL_HIDE_TIME = 0.1;
 const ITEM_HOVER_TIMEOUT = 300;
 
+
+
+
+// const St = imports.gi.St;
+// const Main = imports.ui.main;
+// const Util = imports.misc.util;
+// const Mainloop = imports.mainloop;
+// const Clutter = imports.gi.Clutter;
+// const Gio = imports.gi.Gio;
+// const GLib = imports.gi.GLib;
+// const GObject = imports.gi.GObject;
+//
+// const ExtensionUtils = imports.misc.extensionUtils;
+// const Me = ExtensionUtils.getCurrentExtension();
+const UDisks2 = Me.imports.udisks2;
+// const AticonfigUtil = Me.imports.aticonfigUtil;
+const NvidiaUtil = Me.imports.nvidiaUtil;
+// const HddtempUtil = Me.imports.hddtempUtil;
+const SensorsUtil = Me.imports.sensorsUtil;
+const smartctlUtil = Me.imports.smartctlUtil;
+// const nvmecliUtil = Me.imports.nvmecliUtil;
+// const BumblebeeNvidiaUtil = Me.imports.bumblebeeNvidiaUtil;
+// const FreonItem = Me.imports.freonItem;
+
 // TODO: Prototype this onto Object class...
 function merge_options(obj1, obj2) {
     var obj3 = {};
@@ -1208,7 +1232,227 @@ const NetworkIndicator = new Lang.Class({
     }
 });
 
-const INDICATORS = [CpuIndicator, MemoryIndicator, SwapIndicator, NetworkIndicator];
+const TemperatureIndicator = new Lang.Class({
+    Name: 'GnomeStatsPro.TemperatureIndicator',
+    Extends: Indicator,
+
+    _init: function() {
+        this.parent({
+            updateInterval: 5000
+        });
+
+        this.current_label = new St.Label({style_class:'title_label'});
+        this.current_label.set_text("Current:");
+
+        this.current_cpu_label = new St.Label({style_class:'description_label'});
+        this.current_cpu_label.set_text("CPU temperature");
+        this.current_cpu_value = new St.Label({style_class:'value_label'});
+
+        this.current_gpu_label = new St.Label({style_class:'description_label'});
+        this.current_gpu_label.set_text("GPU temperature");
+        this.current_gpu_value = new St.Label({style_class:'value_label'});
+
+        let layout = this.dropdown.layout_manager;
+
+        this.temperature_graph = new HorizontalGraph({autoscale: false, max: 100, units: 'C', showMax: false});
+        this.temperature_graph.addDataSet('cpu-temperature', 'cpu-temp-color');
+        this.temperature_graph.addDataSet('gpu-temperature', 'gpu-temp-color');
+
+        layout.attach(this.temperature_graph.actor, 0, 0, 2, 1);
+
+        let x = 0, y = 1;
+        layout.attach(this.current_label, x+0, y+0, 2, 1);
+        layout.attach(this.current_cpu_label, x+0, y+1, 1, 1);
+        layout.attach(this.current_cpu_value, x+1, y+1, 1, 1);
+
+        layout.attach(this.current_gpu_label, x+0, y+2, 1, 1);
+        layout.attach(this.current_gpu_value, x+1, y+2, 1, 1);
+
+        this._initSensor();
+    },
+
+    _initValues: function() {
+        this.cpu_temperature = 25;
+        this.gpu_temperature = 25;
+
+        this.addDataSet('cpu-temperature', 'temp-cool-color');
+        this.addDataSet('gpu-temperature', 'temp-cool-color');
+        this.enable();
+    },
+
+    _updateValues: function() {
+        this.addDataPoint('cpu-temperature', this.cpu_temperature/100);
+        this.addDataPoint('gpu-temperature', this.gpu_temperature/100);
+
+        this.temperature_graph.addDataPoint('cpu-temperature', this.cpu_temperature);
+        this.temperature_graph.addDataPoint('gpu-temperature', this.gpu_temperature);
+
+        let old_cpu_color = this.stats['cpu-temperature'].color;
+        let old_gpu_color = this.stats['gpu-temperature'].color;
+
+        this.stats['cpu-temperature'].color = this.lookupTemperatureColor(this.cpu_temperature);
+        this.stats['gpu-temperature'].color = this.lookupTemperatureColor(this.gpu_temperature);
+        if (old_cpu_color != this.stats['cpu-temperature'].color || old_gpu_color != this.stats['gpu-temperature'].color) {
+          this._updateStyles();
+        }
+        // this.setColor('cpu-temperature', this.lookupTemperatureColor(this.cpu_temperature));
+        // this.setColor('gpu-temperature', this.lookupTemperatureColor(this.gpu_temperature));
+
+        let format = '%.0f%s';
+        this.current_cpu_value.set_text(format.format(this.cpu_temperature, "\u00b0C"));
+        this.current_gpu_value.set_text(format.format(this.gpu_temperature, "\u00b0C"));
+
+        this._querySensors();
+        this._updateDisplay();
+    },
+
+    lookupTemperatureColor: function(t) {
+      if (t > 85) {
+          return "temp-hot-color";
+      } else if (t > 55) {
+          return "temp-warm-color";
+      } else if (t > 35) {
+          return "temp-norm-color";
+      } else {
+          return "temp-cool-color";
+      }
+    },
+
+    enable: function() {
+        this.parent();
+        if (this.temperature_graph) this.temperature_graph.enable();
+    },
+
+    disable: function() {
+        if (this.temperature_graph) this.temperature_graph.disable();
+        this.parent();
+    },
+
+    showPopup: function() {
+        this.temperature_graph.enable();
+        this.parent(this.temperature_graph);
+    },
+
+    hidePopup: function() {
+        this.temperature_graph.disable();
+        this.parent(this.temperature_graph);
+    },
+
+
+
+
+    _initSensor: function() {
+        this._utils = {
+            sensors: new SensorsUtil.SensorsUtil()
+        };
+        // this._initDriveUtility();
+        this._initGpuUtility();
+        this._querySensors();
+    },
+
+
+    _initDriveUtility: function(){
+      // this._utils.disks = new smartctlUtil.smartctlUtil();
+      // this._utils.disks = new HddtempUtil.HddtempUtil();
+      this._utils.disks = new UDisks2.UDisks2(() => {
+          // this._updateDisplay(); we cannot change actor in background thread #74
+      });
+      // this._utils.disks = new nvmecliUtil.nvmecliUtil();
+    },
+
+    _destroyDriveUtility: function(){
+        if(this._utils.disks){
+            this._utils.disks.destroy();
+            delete this._utils.disks;
+        }
+    },
+
+    _initGpuUtility: function(){
+      this._utils.gpu = new NvidiaUtil.NvidiaUtil();
+      // this._utils.gpu = new AticonfigUtil.AticonfigUtil();
+      // this._utils.gpu = new BumblebeeNvidiaUtil.BumblebeeNvidiaUtil();
+    },
+
+    _destroyGpuUtility: function(){
+        if(this._utils.gpu){
+            this._utils.gpu.destroy();
+            delete this._utils.gpu;
+        }
+    },
+
+    _onDestroy: function(){
+        this._destroyDriveUtility();
+        this._destroyGpuUtility();
+    },
+
+    _querySensors: function(){
+        for (let sensor of Object.values(this._utils)) {
+            if (sensor.available) {
+                sensor.execute(() => {
+                    // we cannot change actor in background thread #74
+                });
+            }
+        }
+    },
+
+
+    _updateDisplay : function(){
+        let gpuTempInfo = this._utils.sensors.gpu;
+
+        if (this._utils.gpu && this._utils.gpu.available)
+            gpuTempInfo = gpuTempInfo.concat(this._utils.gpu.temp);
+
+        let sensorsTempInfo = this._utils.sensors.temp;
+
+        // let driveTempInfo = [];
+        // if(this._utils.disks && this._utils.disks.available) {
+        //     driveTempInfo = this._utils.disks.temp;
+        // }
+
+        sensorsTempInfo.sort(function(a,b) { return a.label.localeCompare(b.label) });
+        // driveTempInfo.sort(function(a,b) { return a.label.localeCompare(b.label) });
+
+        // let tempInfo = gpuTempInfo.concat(sensorsTempInfo).concat(driveTempInfo);
+        let tempInfo = gpuTempInfo.concat(sensorsTempInfo);
+
+        if (tempInfo.length > 0){
+            let total = 0;
+            let sum = 0;
+            let max = 0;
+            for (let i of tempInfo){
+                if(i.temp !== null){
+                    total++;
+                  sum += i.temp;
+                  if (i.temp > max)
+                      max = i.temp;
+                }
+            }
+
+            let sensors = [];
+
+            for (let i of gpuTempInfo){
+                this.gpu_temperature = i.temp;
+            }
+            // for (let i of sensorsTempInfo){
+            //   global.log("temperature: " + i.temp)
+            // }
+            // for (let i of driveTempInfo){
+            //   global.log("drive-temperature: " + i.temp)
+            // }
+
+            if (tempInfo.length > 0){
+                this.cpu_temperature = (sum/total)
+            }
+        } else {
+            global.log("run as root")
+        }
+    },
+
+
+});
+
+
+const INDICATORS = [CpuIndicator, TemperatureIndicator, MemoryIndicator, SwapIndicator, NetworkIndicator ];
 
 const Extension = new Lang.Class({
     Name: 'GnomeStatsPro.Extension',

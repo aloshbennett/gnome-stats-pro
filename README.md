@@ -45,3 +45,6 @@ improvements.
 **Gnome Stats Pro** is an open-source project and is licensed under
 the GPL version 2 or higher. For more information on how this project
 is licensed, see the included `LICENSE.md` file.
+
+## Attributions
+  Ability to monitor temperature from https://github.com/UshakovVasilii/gnome-shell-extension-freon

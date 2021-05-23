@@ -36,6 +36,10 @@
 
     network-in-color: rgb(0,190,240);
     network-out-color: rgb(242,0,124);
+
+    cpu-temp-color: rgb(0,190,240);
+    gpu-temp-color: rgb(242,0,124);
+
 }
 
 .gsp-graph-overlay .label {
@@ -74,6 +78,11 @@
     network-ok-color: rgb(130,130,130);
     network-warn-color: rgb(240,190,0);
     network-bad-color: rgb(240,85,0);
+
+    temp-cool-color: rgb(0,156,255);
+    temp-norm-color: rgb(0,255,141);
+    temp-warm-color: rgb(255,221,0);
+    temp-hot-color: rgb(255,67,0);
 }
 
 .gsp-dropdown {
